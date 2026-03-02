@@ -1,12 +1,10 @@
 # DiAi Trader -- A股多智能体交易系统
 
-现在干专业活，不上AI明显不行。为此，针对广大A股散户，我们开源一个专门用于炒A股的《智能体交易系统》：
+现在干专业活，不上AI明显不行。针对广大A股散户，我们开源一个专门用于炒A股的《智能体交易系统》：
 
 > 通过灵活的资产与自选股配置，让任意智能体自主交易可选标的，并可视化分析决策过程。
 
-项目的开源代码在这：
-
-github.ddd
+项目的开源代码在这： [系统源代码](https://github.com/disanda/DiAi-Trader)
 
 当前功能如下, 后续会逐步完善功能：
 
@@ -39,7 +37,7 @@ github.ddd
 
 智能体连续交易的过程是：
 
-- 根据过去股票的价格，和当前持仓，分析未来的走势，作出今天的交易决策
+- 根据过去股票价格，当前持仓，分析可交易《股票集合》的未来走势，作出今天的交易决策
 
   > 这里服从T+1制度，买入统一按开盘价买，卖出按照收盘价卖。
 
@@ -59,11 +57,13 @@ github.ddd
 
 ![4](/Users/apple/Desktop/A-my-code/0.Astock-DiAi/figs/4.png)
 
-该页面下面展示实时分析的数据，包括智能体api的反馈，及即时交易记录。
+该页面还展示《性能排行榜》以及实时性数据，包括智能体api的反馈，即《最近交易记录》。
 
 - 《智能体持仓分析》
 
-这个页面多了个下拉列表，可以分析不同智能体的决策分析过程，持仓和盈利情况, 这是千问3的：
+这个页面多一个下拉列表，用于选择智能体，可分析不同智能体的分析决策过程，持仓和盈利情况。
+
+这是千问3的：
 
 ![8](/Users/apple/Desktop/A-my-code/0.Astock-DiAi/figs/8.png)
 
@@ -71,11 +71,11 @@ github.ddd
 
 ![5](./figs/5.png)
 
-该页面下方可展示智能体每日的《复盘日志》
+该页面下方展示智能体的《复盘日志》：
 
 ![6](./figs/6.png)
 
-展开一天的看一下：
+这是其中一份：
 
 ![7](/Users/apple/Desktop/A-my-code/0.Astock-DiAi/figs/7.png)
 
@@ -543,12 +543,12 @@ python -m http.server 8888
 
 ## 5. 参考文献
 
-这个项目改自港大的数据科学研究项目，AI交易智能体：
-
-- 博客介绍：[AI-Trader](https://mp.weixin.qq.com/s/Ap8CopzvHQpj6ERBfBNukw)
-
-- 项目论文：[AI-Trader: Benchmarking Autonomous Agents in Real-Time Financial Markets](https://arxiv.org/abs/2512.10971)
-
-- 项目地址：https://github.com/HKUDS/AI-Trader
+- [本项目](https://github.com/disanda/DiAi-Trader)改自港大的数据科学研究项目：[AI-Trader](https://github.com/HKUDS/AI-Trader)：
+  
+  - 博客介绍：[AI-Trader](https://mp.weixin.qq.com/s/Ap8CopzvHQpj6ERBfBNukw)
+  
+  - 项目论文：[AI-Trader: Benchmarking Autonomous Agents in Real-Time Financial Markets](https://arxiv.org/abs/2512.10971)
+  
+  
   
     
