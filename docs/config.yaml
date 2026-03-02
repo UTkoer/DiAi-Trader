@@ -1,0 +1,270 @@
+# AI Trader Frontend Configuration
+# This file contains all agent configurations and display settings
+# Market configurations - Easy to extend for new markets (e.g., crypto)
+
+markets:
+  sse50:
+    name: "A股 (上证 50)"
+    subtitle: "不同智能体在 上证50指数成份股的表现"
+    benchmark_name: "上证 A50"
+    benchmark_display_name: "上证A50指数"
+    currency: "CNY"
+    icon: "🇨🇳"
+    price_data_type: "merged"  # merged.jsonl file
+    data_dir: ""
+    price_data_file: "a_stock_data/sse_50_day/merged.jsonl"
+    benchmark_file: "a_stock_data/sse_50_day/index_daily_000016.SH.json"
+    time_granularity: "daily"  # daily dates without hour component
+    enabled: true
+    agents:  # CN market specific agents
+      - folder: "agent_data_astock/sse_50_day/glm-4.5-air"
+        display_name: "glm-4.5-air"
+        icon: "./figs/zhipu-color.svg"
+        color: "#66fff2"
+        enabled: true
+      - folder: "agent_data_astock/sse_50_day/glm-4.5-flash"
+        display_name: "glm-4.5-flash"
+        icon: "./figs/zhipu-color.svg"
+        color: "#6610f2"
+        enabled: true
+      - folder: "agent_data_astock/sse_50_day/gpt-oss-120b"
+        display_name: "gpt-oss-120b"
+        icon: "./figs/openai.svg"
+        color: "#00ffcc"
+        enabled: true
+      - folder: "agent_data_astock/sse_50_day/qwen3-235b-a22b"
+        display_name: "qwen3-235b-a22b"
+        color: "#00d4ff"
+        enabled: true
+        icon: "./figs/qwen.svg"
+  etf_30:
+    name: "A股-ETF30"
+    subtitle: "不同智能体在 在ETF上的表现"
+    benchmark_name: "上证指数"
+    benchmark_display_name: "上证指数"
+    currency: "CNY"
+    icon: "🇨🇳"
+    price_data_type: "merged"  # merged.jsonl file
+    data_dir: ""
+    price_data_file: "a_stock_data/ETF_30_day/merged.jsonl"
+    benchmark_file: "a_stock_data/ETF_30_day/index_Daily_000001.SH.json"
+    time_granularity: "daily"  # daily dates without hour component
+    enabled: true
+    agents:  # CN market specific agents
+      - folder: "agent_data_astock/ETF_30_day/gpt-oss-120b"
+        display_name: "gpt-oss-120b"
+        icon: "./figs/openai.svg"
+        color: "#6610f2"
+        enabled: true
+      - folder: "agent_data_astock/ETF_30_day/qwen3-235b-a22b"
+        display_name: "qwen3-235b-a22b"
+        color: "#00d4ff"
+        enabled: true
+        icon: "./figs/qwen.svg"
+  zxg_30:
+    name: "A股-自选股30"
+    subtitle: "不同智能体在 在自选股上的表现"
+    benchmark_name: "上证指数"
+    benchmark_display_name: "上证指数"
+    currency: "CNY"
+    icon: "🇨🇳"
+    price_data_type: "merged"  # merged.jsonl file
+    data_dir: ""
+    price_data_file: "a_stock_data/ZXG_30_day/merged.jsonl"
+    benchmark_file: "a_stock_data/ZXG_30_day/index_Daily_000001.SH.json"
+    time_granularity: "daily"  # daily dates without hour component
+    enabled: true
+    agents:  # CN market specific agents
+      - folder: "agent_data_astock/ZXG_30_day/gpt-oss-120b"
+        display_name: "gpt-oss-120b"
+        icon: "./figs/openai.svg"
+        color: "#6610f2"
+        enabled: true
+      - folder: "agent_data_astock/ZXG_30_day/qwen3-235b-a22b"
+        display_name: "qwen3-235b-a22b"
+        color: "#00d4ff"
+        enabled: true
+        icon: "./figs/qwen.svg"
+  zxg_17:
+    name: "A股-自选股17"
+    subtitle: "不同智能体在 在自选股上的表现"
+    benchmark_name: "上证指数"
+    benchmark_display_name: "上证指数"
+    currency: "CNY"
+    icon: "🇨🇳"
+    price_data_type: "merged"  # merged.jsonl file
+    data_dir: ""
+    price_data_file: "a_stock_data/ZXG_17_day/merged.jsonl"
+    benchmark_file: "a_stock_data/ZXG_17_day/index_Daily_000001.SH.json"
+    time_granularity: "daily"  # daily dates without hour component
+    enabled: true
+    agents:  # CN market specific agents
+      - folder: "agent_data_astock/ZXG_17_day/gpt-oss-120b"
+        display_name: "gpt-oss-120b"
+        icon: "./figs/openai.svg"
+        color: "#6610f2"
+        enabled: true
+      - folder: "agent_data_astock/ZXG_17_day/qwen3-235b-a22b"
+        display_name: "qwen3-235b-a22b"
+        color: "#00d4ff"
+        enabled: true
+        icon: "./figs/qwen.svg"
+      # - folder: "qwen3-max"
+      #   display_name: "Qwen3 Max"
+      #   icon: "./figs/qwen.svg"
+      #   color: "#00ffcc"
+      #   enabled: true
+      # - folder: "deepseek-chat-v3.1"
+      #   display_name: "DeepSeek Chat v3.1"
+      #   icon: "./figs/deepseek.svg"
+      #   color: "#ff006e"
+      #   enabled: true
+      # - folder: "gpt-5"
+      #   display_name: "GPT-5"
+      #   icon: "./figs/openai.svg"
+      #   color: "#ffbe0b"
+      #   enabled: true
+      # - folder: "claude-3.7-sonnet"
+      #   display_name: "Claude 3.7 Sonnet"
+      #   icon: "./figs/claude-color.svg"
+      #   color: "#8338ec"
+      #   enabled: true
+      # - folder: "MiniMax-M2"
+      #   display_name: "MiniMax M2"
+      #   icon: "./figs/minimax.svg"
+      #   color: "#3a86ff"
+      #   enabled: true
+  # cn_week:
+  #   name: "A-Shares (Hourly)"
+  #   subtitle: "不同智能体在 上证50指数成份股的表现 (小时级别)"
+  #   data_dir: "agent_data_astock_hour/sse_50_day"
+  #   benchmark_file: "index_daily_sse_50.json"
+  #   benchmark_name: "上证 A50"
+  #   benchmark_display_name: "上证A50指数"
+  #   currency: "CNY"
+  #   icon: "🇨🇳"
+  #   price_data_type: "merged"  # merged.jsonl file
+  #   price_data_file: "a_stock_data_hourly/merged_hourly.jsonl"
+  #   time_granularity: "hourly"  # hourly timestamps
+  #   enabled: true # Hidden from main selector, toggled via JS
+  #   agents:  # CN market specific agents
+  #     - folder: "glm-4.5-air-1"
+  #       display_name: "GLM 4.5"
+  #       icon: "./figs/zhipu-color.svg"
+  #       color: "#6610f2"
+  #       enabled: true
+  #   agents:  # CN market specific agents (hourly)
+  #     - folder: "glm-4.6-astock-hour"
+  #       display_name: "GLM 4.6"
+  #       icon: "./figs/zhipu-color.svg"
+  #       color: "#6610f2"
+  #     - folder: "gemini-2.5-flash-astock-hour"
+  #       display_name: "Gemini 2.5 Flash"
+  #       icon: "./figs/google.svg"
+  #       color: "#00d4ff"
+  #     - folder: "qwen3-max-astock-hour"
+  #       display_name: "Qwen3 Max"
+  #       icon: "./figs/qwen.svg"
+  #       color: "#00ffcc"
+  #     - folder: "deepseek-chat-v3.1-astock-hour"
+  #       display_name: "DeepSeek Chat v3.1"
+  #       icon: "./figs/deepseek.svg"
+  #       color: "#ff006e"
+  #     - folder: "gpt-5-astock-hour"
+  #       display_name: "GPT-5"
+  #       icon: "./figs/openai.svg"
+  #       color: "#ffbe0b"
+  #     - folder: "claude-3.7-sonnet-astock-hour"
+  #       display_name: "Claude 3.7 Sonnet"
+  #       icon: "./figs/claude-color.svg"
+  #       color: "#8338ec"
+  #     - folder: "MiniMax-M2-astock-hour"
+  #       display_name: "MiniMax M2"
+  #       icon: "./figs/minimax.svg"
+  #       color: "#3a86ff"
+  # cn_hour:
+  #   name: "A-Shares (Hourly)"
+  #   subtitle: "不同智能体在 上证50指数成份股的表现 (小时级别)"
+  #   data_dir: "agent_data_astock_hour/sse_50_day"
+  #   benchmark_file: "index_daily_sse_50.json"
+  #   benchmark_name: "上证 A50"
+  #   benchmark_display_name: "上证A50指数"
+  #   currency: "CNY"
+  #   icon: "🇨🇳"
+  #   price_data_type: "merged"  # merged.jsonl file
+  #   price_data_file: "a_stock_data_hourly/merged_hourly.jsonl"
+  #   time_granularity: "hourly"  # hourly timestamps
+  #   enabled: true # Hidden from main selector, toggled via JS
+  #   agents:  # CN market specific agents
+  #     - folder: "glm-4.5-air-1"
+  #       display_name: "GLM 4.5"
+  #       icon: "./figs/zhipu-color.svg"
+  #       color: "#6610f2"
+  #       enabled: true
+  #   agents:  # CN market specific agents (hourly)
+  #     - folder: "glm-4.6-astock-hour"
+  #       display_name: "GLM 4.6"
+  #       icon: "./figs/zhipu-color.svg"
+  #       color: "#6610f2"
+  #     - folder: "gemini-2.5-flash-astock-hour"
+  #       display_name: "Gemini 2.5 Flash"
+  #       icon: "./figs/google.svg"
+  #       color: "#00d4ff"
+  #     - folder: "qwen3-max-astock-hour"
+  #       display_name: "Qwen3 Max"
+  #       icon: "./figs/qwen.svg"
+  #       color: "#00ffcc"
+  #     - folder: "deepseek-chat-v3.1-astock-hour"
+  #       display_name: "DeepSeek Chat v3.1"
+  #       icon: "./figs/deepseek.svg"
+  #       color: "#ff006e"
+  #     - folder: "gpt-5-astock-hour"
+  #       display_name: "GPT-5"
+  #       icon: "./figs/openai.svg"
+  #       color: "#ffbe0b"
+  #     - folder: "claude-3.7-sonnet-astock-hour"
+  #       display_name: "Claude 3.7 Sonnet"
+  #       icon: "./figs/claude-color.svg"
+  #       color: "#8338ec"
+  #     - folder: "MiniMax-M2-astock-hour"
+  #       display_name: "MiniMax M2"
+  #       icon: "./figs/minimax.svg"
+  #       color: "#3a86ff"
+
+
+#Data paths configuration (legacy support - will use market-specific paths when available)
+# data:
+#   base_path: "a_stock_data"
+#   price_file_prefix: "sse_50_day/daily_prices_"
+#   benchmark_file: "sse_50_day/index_daily_sse_50.json"
+
+# Benchmark configuration
+# benchmark:
+#   folder: "QQQ"
+#   display_name: "QQQ Invesco"
+#   icon: "./figs/stock.svg"
+#   color: "#ff6b00"
+#   enabled: true
+
+# Chart display settings
+chart:
+  default_scale: "linear"  # or "logarithmic"
+  max_ticks: 15
+  point_radius: 0
+  point_hover_radius: 7
+  border_width: 3
+  tension: 0.42
+
+# UI settings
+ui:
+  initial_value: 10000  # Starting cash for all agents
+  max_recent_trades: 20  # Number of trades to show in portfolio view
+  date_formats:
+    hourly: "MM/DD HH:mm"
+    daily: "YYYY-MM-DD"
+
+# Cache settings
+cache:
+  enabled: false  # Enable caching for faster page loads
+  max_age_days: 7  # Maximum age of localStorage cache in days
+  show_performance_metrics: true  # Show load time comparison in console

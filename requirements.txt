@@ -1,0 +1,9 @@
+# python==3.10
+langchain==1.0.2
+langchain-openai==1.0.1
+langchain-mcp-adapters>=0.1.14
+fastmcp==2.12.5
+
+# A_stock
+tushare
+efinance
