@@ -133,7 +133,7 @@ class BaseAgentAStock:
             # Create AI model - use custom DeepSeekChatOpenAI for DeepSeek models
             # to handle tool_calls.args format differences (JSON string vs dict)
             if "deepseek" in self.basemodel.lower():
-                self.model = DeepSeekChatOpenAI(
+                self.model = ChatOpenAI(
                     model=self.basemodel,
                     base_url=self.openai_base_url,
                     api_key=self.openai_api_key,
