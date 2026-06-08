@@ -1,0 +1,5 @@
+.vscode/
+logs/
+.env
+data/
+configs/astock_config_day.json
