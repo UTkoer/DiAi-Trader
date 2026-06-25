@@ -26,7 +26,10 @@ from urllib.parse import urlparse, parse_qs
 # ── 路径常量 ────────────────────────────────────────────────
 DOCS_DIR    = Path(__file__).resolve().parent          # .../DiAi--FinancialDataAgent/docs
 PROJECT_DIR = DOCS_DIR.parent                          # .../DiAi--FinancialDataAgent
-STOCKS_FILE = DOCS_DIR / 'data' / 'stocks.json'
+STOCKS_FILE          = DOCS_DIR / 'data' / 'stocks.json'
+# 自定义提示词单文件路径
+STRATEGY_PROMPT_FILE = PROJECT_DIR / 'agent' / 'custom_prompt' / 'trading_strategy_prompt.json'
+JOURNAL_PROMPT_FILE  = PROJECT_DIR / 'agent' / 'custom_prompt' / 'daily_journal_prompt.json'
 
 print(f"📍 Docs dir   : {DOCS_DIR}")
 print(f"📍 Project dir: {PROJECT_DIR}")
@@ -74,6 +77,9 @@ class SaveHandler(BaseHTTPRequestHandler):
         if path == '/health':
             self._json_response(200, {'status': 'ok'})
 
+        elif path == '/load-prompts':
+            self._handle_load_prompts(params)
+
         elif path == '/load-config':
             # ?path=configs/astock_config_day.json
             rel = params.get('path', [None])[0]
@@ -114,6 +120,30 @@ class SaveHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error_response(500, str(e))
 
+    def _handle_load_prompts(self, params):
+        """
+        GET /load-prompts?type=strategy|journal
+        读取单个 JSON 文件，返回其中的 prompts 数组。
+        文件格式：{ "prompts": [{ "id": 1, "title": "...", "content": "...", "active": false }] }
+        若文件不存在则返回空数组。
+        """
+        prompt_type = params.get('type', ['strategy'])[0]
+        target = JOURNAL_PROMPT_FILE if prompt_type == 'journal' else STRATEGY_PROMPT_FILE
+
+        if not target.exists():
+            self._json_response(200, {'success': True, 'prompts': []})
+            return
+
+        try:
+            with open(target, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self._json_response(200, {'success': True, 'prompts': data.get('prompts', [])})
+            print(f'✓ /load-prompts [{prompt_type}]: {target}')
+        except json.JSONDecodeError as e:
+            self.send_error_response(400, f'JSON parse error: {e}')
+        except Exception as e:
+            self.send_error_response(500, str(e))
+
     # ────────────────────────────────────────────────────────
     # POST
     # ────────────────────────────────────────────────────────
@@ -126,8 +156,14 @@ class SaveHandler(BaseHTTPRequestHandler):
         elif path == '/save-config':
             self._handle_save_config()
 
+        elif path == '/save-prompt':
+            self._handle_save_prompt()
+
         elif path == '/download-stocks':
             self._handle_download_stocks()
+
+        elif path == '/update-sci2k':
+            self._handle_update_sci2k()
 
         elif path == '/run-agent':
             self._handle_run_agent()
@@ -191,6 +227,114 @@ class SaveHandler(BaseHTTPRequestHandler):
             self.send_error_response(400, 'Invalid JSON')
         except Exception as e:
             self.send_error_response(500, str(e))
+
+    # ── /save-prompt ────────────────────────────────────────
+    def _handle_save_prompt(self):
+        """
+        POST /save-prompt
+        Body: { "type": "strategy"|"journal", "prompts": [...] }
+        将完整的 prompts 数组写入对应的单个 JSON 文件。
+        """
+        try:
+            body        = self._read_body()
+            payload     = json.loads(body)
+            prompt_type = payload.get('type', 'strategy')
+            prompts     = payload.get('prompts')
+
+            if not isinstance(prompts, list):
+                self.send_error_response(400, '"prompts" must be a list'); return
+
+            target = JOURNAL_PROMPT_FILE if prompt_type == 'journal' else STRATEGY_PROMPT_FILE
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(target, 'w', encoding='utf-8') as f:
+                json.dump({'prompts': prompts}, f, indent=2, ensure_ascii=False)
+
+            self._json_response(200, {'success': True, 'message': f'✓ Saved {target.name}'})
+            print(f'✓ /save-prompt [{prompt_type}]: {target}')
+        except json.JSONDecodeError:
+            self.send_error_response(400, 'Invalid JSON')
+        except Exception as e:
+            self.send_error_response(500, str(e))
+
+    # ── /update-sci2k ───────────────────────────────────────
+    def _handle_update_sci2k(self):
+        """
+        POST /update-sci2k
+        Body: { "start_date": "20260401" }   (可选，缺省用 body 里的值)
+        调用 data/get_SCI2000_data.py，更新中证2000数据至今日。
+        通过 SSE 实时推送输出。
+        """
+        import time
+        try:
+            body    = self._read_body()
+            payload = json.loads(body) if body.strip() else {}
+        except Exception:
+            payload = {}
+
+        from datetime import date
+        today      = date.today().strftime('%Y%m%d')
+        start_date = payload.get('start_date', today[:6] + '01')  # 默认本月初
+
+        script = DOCS_DIR / 'data' / 'get_SCI2000_data.py'
+        if not script.exists():
+            self.send_error_response(404, f'Script not found: {script}'); return
+
+        # SSE 流式输出
+        self.send_response(200)
+        self.send_header('Content-Type',  'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Accel-Buffering', 'no')
+        self._cors()
+        self.end_headers()
+
+        def sse(obj):
+            try:
+                self.wfile.write(('data: ' + json.dumps(obj, ensure_ascii=False) + '\n\n').encode('utf-8'))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        sse({'type': 'stage', 'message': f'开始更新中证2000数据 {start_date} → {today}'})
+
+        env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+        cmd = [sys.executable, str(script), '--start', start_date, '--end', today]
+
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(DOCS_DIR / 'data'),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8', errors='replace', env=env
+            )
+            q = queue.Queue()
+            def _read(pipe, kind):
+                for line in pipe: q.put((kind, line.rstrip()))
+                q.put((kind, None))
+            threading.Thread(target=_read, args=(proc.stdout, 'stdout'), daemon=True).start()
+            threading.Thread(target=_read, args=(proc.stderr, 'stderr'), daemon=True).start()
+
+            done = 0
+            while done < 2:
+                kind, line = q.get()
+                if line is None: done += 1
+                else:
+                    sse({'type': kind, 'line': line})
+                    print(f'  [sci2k/{kind}] {line}')
+
+            proc.wait()
+            if proc.returncode == 0:
+                sse({'type': 'success', 'message': '✓ 中证2000数据更新完成'})
+            else:
+                sse({'type': 'error', 'message': f'✗ 脚本退出码 {proc.returncode}'})
+        except Exception as e:
+            sse({'type': 'error', 'message': f'执行失败: {e}'})
+
+        try:
+            self.wfile.write(b'data: [DONE]\n\n')
+            self.wfile.flush()
+        except Exception:
+            pass
+        print('✓ /update-sci2k 完成')
 
     # ── /download-stocks ────────────────────────────────────
     def _handle_download_stocks(self):
@@ -403,7 +547,10 @@ def run_server(port=9999):
     print(f'  POST /save                 ← stocks.json')
     print(f'  POST /download-stocks      ← tushare 脚本')
     print(f'  GET  /load-config?path=…   ← 读配置文件')
+    print(f'  GET  /load-prompts?type=…  ← 读提示词文件 (strategy|journal)')
+    print(f'  POST /save-prompt          ← 写提示词文件')
     print(f'  POST /save-config          ← 写配置文件')
+    print(f'  POST /update-sci2k         ← SSE 更新中证2000数据')
     print(f'  POST /run-agent            ← SSE 运行智能体')
     print(f'')
     print(f'🛑  Ctrl+C 停止\n')
