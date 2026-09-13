@@ -13,7 +13,7 @@ Stock Manager Save Server
     python docs/save_stocks_server.py
 """
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 import json
 import os
 import sys
@@ -23,17 +23,33 @@ import queue
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+# Windows terminals may use GBK and reject existing icon characters in logs.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(errors='replace')
+
 # ── 路径常量 ────────────────────────────────────────────────
 DOCS_DIR    = Path(__file__).resolve().parent          # .../DiAi--FinancialDataAgent/docs
 PROJECT_DIR = DOCS_DIR.parent                          # .../DiAi--FinancialDataAgent
-STOCKS_FILE = DOCS_DIR / 'data' / 'stocks.json'
+STOCKS_FILE          = DOCS_DIR / 'data' / 'stocks.json'
+ASTOCKS_SYMBOLS_DIR  = PROJECT_DIR / 'data' / 'Astocks' / 'symbols'
+ASTOCKS_STOCKS_DIR   = PROJECT_DIR / 'data' / 'Astocks' / 'stocks'
+ASTOCKS_INDICES_DIR  = PROJECT_DIR / 'data' / 'Astocks' / 'indices'
+ASTOCKS_FACTORS_DIR  = PROJECT_DIR / 'data' / 'Astocks' / 'factors'
+ASTOCKS_DAILY_DIR    = DOCS_DIR / 'data' / 'Astocks' / 'daily'
+ETFS_DATA_DIR        = PROJECT_DIR / 'data' / 'ETFs'
+PREDICT_OUTPUT_DIR   = PROJECT_DIR / 'data' / 'predict'
+MARKET_FACTORS_CACHE = None
+# 自定义提示词单文件路径
+STRATEGY_PROMPT_FILE = PROJECT_DIR / 'agent' / 'custom_prompt' / 'trading_strategy_prompt.json'
+JOURNAL_PROMPT_FILE  = PROJECT_DIR / 'agent' / 'custom_prompt' / 'daily_journal_prompt.json'
 
 print(f"📍 Docs dir   : {DOCS_DIR}")
 print(f"📍 Project dir: {PROJECT_DIR}")
 print(f"📁 Stocks file: {STOCKS_FILE}")
 
 
-class SaveHandler(BaseHTTPRequestHandler):
+class SaveHandler(SimpleHTTPRequestHandler):
 
     # ────────────────────────────────────────────────────────
     # CORS 公共头
@@ -74,6 +90,9 @@ class SaveHandler(BaseHTTPRequestHandler):
         if path == '/health':
             self._json_response(200, {'status': 'ok'})
 
+        elif path == '/load-prompts':
+            self._handle_load_prompts(params)
+
         elif path == '/load-config':
             # ?path=configs/astock_config_day.json
             rel = params.get('path', [None])[0]
@@ -82,8 +101,359 @@ class SaveHandler(BaseHTTPRequestHandler):
                 return
             self._handle_load_config(rel)
 
+        elif path == '/astocks-symbol-groups':
+            self._handle_astocks_symbol_groups()
+
+        elif path == '/astocks-snapshot':
+            self._handle_astocks_snapshot(params)
+
+        elif path == '/astocks-indices':
+            self._handle_astocks_indices()
+
+        elif path == '/astocks-index':
+            self._handle_astocks_index(params)
+
+        elif path == '/astocks-factor-index':
+            self._handle_astocks_factor_index(params)
+
+        elif path == '/astocks-factor':
+            self._handle_astocks_factor(params)
+
+        elif path == '/market-factors':
+            self._handle_market_factors()
+
+        elif path == '/predict-results':
+            self._handle_predict_results(params)
+
         else:
-            self.send_error_response(404, f'Unknown endpoint: {path}')
+            super().do_GET()
+
+    def _symbol_groups_dir(self):
+        """Use the project data directory requested by the user, with docs as fallback."""
+        root = ASTOCKS_SYMBOLS_DIR
+        fallback = DOCS_DIR / 'data' / 'Astocks' / 'symbols'
+        return root if root.exists() else fallback
+
+    def _handle_astocks_symbol_groups(self):
+        groups = []
+        directories = [(self._symbol_groups_dir(), 'Astocks')]
+        etf_symbols = ETFS_DATA_DIR / 'symbols'
+        if etf_symbols.exists():
+            directories.append((etf_symbols, 'ETFs'))
+        for directory, asset_type in directories:
+            if not directory.exists():
+                continue
+            for path in sorted(directory.glob('*.json')):
+                try:
+                    name, symbols = self._read_symbol_group(path)
+                    group_id = path.stem if asset_type == 'Astocks' else f'etf:{path.stem}'
+                    groups.append({'id': group_id, 'name': name, 'symbols': symbols, 'asset_type': asset_type, 'data_base': 'data/Astocks' if asset_type == 'Astocks' else 'data/ETFs'})
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+        self._json_response(200, {'success': True, 'groups': groups})
+
+    def _read_symbol_group(self, path):
+        with path.open('r', encoding='utf-8') as f:
+            payload = json.load(f)
+        blocks = payload if isinstance(payload, list) else [payload]
+        name = path.stem
+        values = []
+        for index, block in enumerate(blocks):
+            if isinstance(block, str):
+                values.append(block)
+            elif isinstance(block, dict):
+                if index == 0:
+                    name = block.get('symbolname') or name
+                values.extend(block.get('symbols') or block.get('ts_codes') or [])
+        return str(name), sorted({str(value).strip().upper() for value in values if str(value).strip()})
+
+    def _handle_astocks_snapshot(self, params):
+        group_id = params.get('group', ['__all__'])[0]
+        requested_date = params.get('date', [None])[0]
+        asset_dir = ASTOCKS_STOCKS_DIR
+        is_etf = group_id.startswith('etf:')
+        if is_etf:
+            asset_dir = ETFS_DATA_DIR / 'stocks'
+            group_id = group_id.split(':', 1)[1]
+        if group_id == '__all__':
+            symbols = [path.stem for path in asset_dir.glob('*.json')]
+        else:
+            group_file = (ETFS_DATA_DIR / 'symbols' if is_etf else self._symbol_groups_dir()) / f'{group_id}.json'
+            if not group_file.exists():
+                self.send_error_response(404, f'Group not found: {group_id}')
+                return
+            _, symbols = self._read_symbol_group(group_file)
+
+        rows = []
+        actual_date = None
+        for symbol in symbols:
+            stock_file = asset_dir / f'{symbol}.json'
+            try:
+                with stock_file.open('r', encoding='utf-8') as f:
+                    records = json.load(f).get('records') or []
+                eligible = [r for r in records if not requested_date or str(r.get('trade_date', '')).replace('-', '') <= requested_date]
+                if not eligible:
+                    continue
+                row = eligible[-1]
+                rows.append({'ts_code': symbol, **row})
+                actual_date = max(actual_date or '', str(row.get('trade_date', '')).replace('-', ''))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        self._json_response(200, {'success': True, 'date': actual_date, 'data': rows})
+
+    def _handle_astocks_indices(self):
+        items = []
+        for path in sorted(ASTOCKS_INDICES_DIR.glob('*.json')):
+            try:
+                with path.open('r', encoding='utf-8') as f:
+                    payload = json.load(f)
+                records = payload.get('records') or []
+                if records:
+                    items.append({'ts_code': payload.get('ts_code', path.stem), 'name': payload.get('name', path.stem), **records[-1]})
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        self._json_response(200, {'success': True, 'data': items})
+
+    def _handle_astocks_index(self, params):
+        symbol = params.get('symbol', [''])[0]
+        if not symbol or any(char not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-' for char in symbol):
+            self.send_error_response(400, 'Invalid index symbol')
+            return
+        path = ASTOCKS_INDICES_DIR / f'{symbol}.json'
+        if not path.exists():
+            self.send_error_response(404, f'Index not found: {symbol}')
+            return
+        try:
+            with path.open('r', encoding='utf-8') as f:
+                self._json_response(200, {'success': True, 'data': json.load(f)})
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            self.send_error_response(500, str(exc))
+
+    def _handle_astocks_factor_index(self, params):
+        """List saved index factor series and their available dates."""
+        items = []
+        if ASTOCKS_FACTORS_DIR.exists():
+            for directory in sorted(ASTOCKS_FACTORS_DIR.iterdir()):
+                if not directory.is_dir() or any(ch not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-' for ch in directory.name):
+                    continue
+                dates = sorted(path.stem for path in directory.glob('*.json') if path.stem.isdigit())
+                if not dates:
+                    continue
+                name = directory.name
+                index_path = ASTOCKS_INDICES_DIR / f'{directory.name}.json'
+                if index_path.exists():
+                    try:
+                        with index_path.open('r', encoding='utf-8') as handle:
+                            name = json.load(handle).get('name') or name
+                    except (OSError, ValueError, json.JSONDecodeError):
+                        pass
+                first_path = directory / f'{dates[-1]}.json'
+                try:
+                    with first_path.open('r', encoding='utf-8') as handle:
+                        payload = json.load(handle)
+                    name = payload.get('name') or name
+                except (OSError, ValueError, json.JSONDecodeError):
+                    pass
+                items.append({'ts_code': directory.name, 'name': name, 'dates': dates})
+        self._json_response(200, {'success': True, 'data': items})
+
+    def _handle_astocks_factor(self, params):
+        symbol = params.get('symbol', [''])[0]
+        requested_date = params.get('date', [''])[0]
+        valid = lambda value: value and all(ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-' for ch in value)
+        if not valid(symbol) or (requested_date and not requested_date.isdigit()):
+            self.send_error_response(400, 'Invalid symbol or date')
+            return
+        directory = ASTOCKS_FACTORS_DIR / symbol
+        if not directory.exists():
+            self.send_error_response(404, f'Factors not found: {symbol}')
+            return
+        dates = sorted(path.stem for path in directory.glob('*.json') if path.stem.isdigit())
+        actual_date = requested_date if requested_date in dates else (dates[-1] if dates else '')
+        if not actual_date:
+            self.send_error_response(404, f'No factor dates found: {symbol}')
+            return
+        path = directory / f'{actual_date}.json'
+        try:
+            with path.open('r', encoding='utf-8') as handle:
+                payload = json.load(handle)
+            self._json_response(200, {'success': True, 'data': payload, 'dates': dates})
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            self.send_error_response(500, str(exc))
+
+    def _handle_market_factors(self):
+        global MARKET_FACTORS_CACHE
+        if MARKET_FACTORS_CACHE is not None:
+            self._json_response(200, {'success': True, 'data': MARKET_FACTORS_CACHE})
+            return
+        points = []
+        files = sorted(ASTOCKS_DAILY_DIR.glob('*.json'))
+        macro = {}
+        macro_file = PROJECT_DIR / 'data' / 'Astocks' / 'market_factors_macro.json'
+        if macro_file.exists():
+            try:
+                with macro_file.open('r', encoding='utf-8') as f:
+                    macro = json.load(f)
+            except (OSError, ValueError, json.JSONDecodeError):
+                macro = {}
+        for path in files:
+            try:
+                with path.open('r', encoding='utf-8') as f:
+                    rows = (json.load(f).get('data') or [])
+                amounts = sorted(
+                    ((float(row.get('amount') or 0), row) for row in rows),
+                    key=lambda item: item[0],
+                )
+                total_amount = sum(value for value, _ in amounts)
+                total_mv = sum(float(row.get('total_mv') or 0) for _, row in amounts)
+                top_n = max(1, int(len(amounts) * 0.05))
+                crowding = sum(value for value, _ in amounts[-top_n:]) / total_amount if total_amount else None
+                day = path.stem
+                extra = macro.get(day, {}) if isinstance(macro, dict) else {}
+                points.append({'date': day, 'turnover_ratio': total_amount / (total_mv * 10) if total_mv else None, 'crowding': crowding, 'margin_ratio': extra.get('margin_ratio'), 'deposit_ratio': extra.get('deposit_ratio')})
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        MARKET_FACTORS_CACHE = points
+        self._json_response(200, {'success': True, 'data': points})
+
+    def _handle_predict_results(self, params):
+        """List locally generated competition results; never exposes model config."""
+        requested_agent = params.get('agent', [''])[0]
+        requested_date = params.get('date', [''])[0]
+        items = []
+        indices = self._load_prediction_indices()
+        if not PREDICT_OUTPUT_DIR.exists():
+            self._json_response(200, {'success': True, 'data': items})
+            return
+        for agent_dir in sorted(PREDICT_OUTPUT_DIR.iterdir()):
+            if not agent_dir.is_dir() or (requested_agent and agent_dir.name != requested_agent):
+                continue
+            for path in sorted(agent_dir.glob('*.json'), reverse=True):
+                if requested_date and path.stem != requested_date:
+                    continue
+                try:
+                    with path.open('r', encoding='utf-8') as handle:
+                        payload = json.load(handle)
+                    predictions = [self._verify_prediction(item, payload.get('prediction_date', path.stem), indices)
+                                   for item in (payload.get('predictions') or [])]
+                    items.append({
+                        'agent_id': agent_dir.name,
+                        'agent_name': payload.get('agent_name', agent_dir.name),
+                        'prediction_date': payload.get('prediction_date', path.stem),
+                        'generated_at': payload.get('generated_at'),
+                        'lookback_days': payload.get('lookback_days'),
+                        'predictions': predictions,
+                    })
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+        leaderboard = self._build_prediction_leaderboard(items)
+        self._json_response(200, {'success': True, 'data': items, 'leaderboard': leaderboard})
+
+    def _load_prediction_indices(self):
+        result = {}
+        for path in ASTOCKS_INDICES_DIR.glob('*.json'):
+            try:
+                with path.open('r', encoding='utf-8') as handle:
+                    payload = json.load(handle)
+                result[str(payload.get('ts_code', path.stem))] = payload
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        return result
+
+    @staticmethod
+    def _classify_pct(value):
+        if value <= -1: return 'strong_down'
+        if value < 0: return 'down'
+        if value < 1: return 'up'
+        return 'strong_up'
+
+    def _verify_prediction(self, item, prediction_date, indices):
+        """Attach actual target-day data without changing the saved prediction file."""
+        if not item.get('prediction') or item.get('error'):
+            return item
+        actual = item.get('actual')
+        if actual is None:
+            index = indices.get(str(item.get('ts_code')))
+            for row in (index or {}).get('records', []):
+                if str(row.get('trade_date', '')) == str(prediction_date):
+                    try:
+                        pct = float(row.get('pct_chg'))
+                    except (TypeError, ValueError):
+                        break
+                    actual = {
+                        'trade_date': str(prediction_date), 'pct_chg': pct,
+                        'direction': 'up' if pct >= 0 else 'down',
+                        'candle_class': self._classify_pct(pct),
+                        'open': row.get('open'), 'high': row.get('high'),
+                        'low': row.get('low'), 'close': row.get('close'),
+                    }
+                    break
+        verification = None
+        if actual:
+            prediction = item['prediction']
+            verification = {
+                'direction_correct': prediction.get('direction') == actual.get('direction'),
+                'candle_correct': prediction.get('candle_class') == actual.get('candle_class'),
+            }
+        return {**item, 'actual': actual, 'verification': verification}
+
+    @staticmethod
+    def _build_prediction_leaderboard(items):
+        grouped = {}
+        for run in items:
+            key = run.get('agent_id') or run.get('agent_name')
+            entry = grouped.setdefault(key, {
+                'agent_id': key, 'agent_name': run.get('agent_name'), 'run_count': 0,
+                'prediction_dates': [], 'total_predictions': 0, 'verified_predictions': 0,
+                'pending_predictions': 0, 'direction_correct': 0, 'candle_correct': 0,
+            })
+            entry['run_count'] += 1
+            date = run.get('prediction_date')
+            if date and date not in entry['prediction_dates']:
+                entry['prediction_dates'].append(date)
+            rows = [item for item in run.get('predictions', []) if item.get('prediction')]
+            verified = [item for item in rows if item.get('verification') is not None]
+            entry['total_predictions'] += len(rows)
+            entry['verified_predictions'] += len(verified)
+            entry['pending_predictions'] += len(rows) - len(verified)
+            entry['direction_correct'] += sum(1 for item in verified if item['verification'].get('direction_correct'))
+            entry['candle_correct'] += sum(1 for item in verified if item['verification'].get('candle_correct'))
+        board = []
+        for entry in grouped.values():
+            verified_count = entry['verified_predictions']
+            entry['prediction_dates'].sort()
+            entry['latest_prediction_date'] = entry['prediction_dates'][-1] if entry['prediction_dates'] else None
+            entry['direction_accuracy'] = round(entry['direction_correct'] / verified_count * 100, 2) if verified_count else None
+            entry['candle_accuracy'] = round(entry['candle_correct'] / verified_count * 100, 2) if verified_count else None
+            board.append(entry)
+        board.sort(key=lambda item: (item['direction_accuracy'] is not None, item['direction_accuracy'] or -1,
+                                     item['candle_accuracy'] or -1), reverse=True)
+        for index, item in enumerate(board, 1):
+            item['rank'] = index
+        return board
+
+    def _handle_save_astocks_symbol_group(self):
+        try:
+            payload = json.loads(self._read_body())
+            group_id = str(payload.get('id', '')).strip()
+            symbols = payload.get('symbols', [])
+            if not group_id or not isinstance(symbols, list) or not all(isinstance(v, str) for v in symbols):
+                self.send_error_response(400, 'id and symbols[] are required')
+                return
+            if any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.' for ch in group_id):
+                self.send_error_response(400, 'Invalid group id')
+                return
+            directory = self._symbol_groups_dir()
+            directory.mkdir(parents=True, exist_ok=True)
+            target = directory / f'{group_id}.json'
+            clean = sorted({v.strip().upper() for v in symbols if v.strip()})
+            with target.open('w', encoding='utf-8') as f:
+                json.dump(clean, f, ensure_ascii=False, indent=2)
+            self._json_response(200, {'success': True, 'id': group_id, 'symbols': clean})
+        except json.JSONDecodeError:
+            self.send_error_response(400, 'Invalid JSON')
+        except Exception as exc:
+            self.send_error_response(500, str(exc))
 
     def _handle_load_config(self, rel_path):
         """
@@ -114,11 +484,36 @@ class SaveHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error_response(500, str(e))
 
+    def _handle_load_prompts(self, params):
+        """
+        GET /load-prompts?type=strategy|journal
+        读取单个 JSON 文件，返回其中的 prompts 数组。
+        文件格式：{ "prompts": [{ "id": 1, "title": "...", "content": "...", "active": false }] }
+        若文件不存在则返回空数组。
+        """
+        prompt_type = params.get('type', ['strategy'])[0]
+        target = JOURNAL_PROMPT_FILE if prompt_type == 'journal' else STRATEGY_PROMPT_FILE
+
+        if not target.exists():
+            self._json_response(200, {'success': True, 'prompts': []})
+            return
+
+        try:
+            with open(target, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self._json_response(200, {'success': True, 'prompts': data.get('prompts', [])})
+            print(f'✓ /load-prompts [{prompt_type}]: {target}')
+        except json.JSONDecodeError as e:
+            self.send_error_response(400, f'JSON parse error: {e}')
+        except Exception as e:
+            self.send_error_response(500, str(e))
+
     # ────────────────────────────────────────────────────────
     # POST
     # ────────────────────────────────────────────────────────
     def do_POST(self):
         path = urlparse(self.path).path
+        print(f'POST {path}')
 
         if path == '/save':
             self._handle_save_stocks()
@@ -126,8 +521,17 @@ class SaveHandler(BaseHTTPRequestHandler):
         elif path == '/save-config':
             self._handle_save_config()
 
+        elif path == '/save-prompt':
+            self._handle_save_prompt()
+
         elif path == '/download-stocks':
             self._handle_download_stocks()
+
+        elif path in ('/update-astocks', '/update-sci2k'):
+            self._handle_update_astocks()
+
+        elif path == '/save-astocks-symbol-group':
+            self._handle_save_astocks_symbol_group()
 
         elif path == '/run-agent':
             self._handle_run_agent()
@@ -191,6 +595,148 @@ class SaveHandler(BaseHTTPRequestHandler):
             self.send_error_response(400, 'Invalid JSON')
         except Exception as e:
             self.send_error_response(500, str(e))
+
+    # ── /save-prompt ────────────────────────────────────────
+    def _handle_save_prompt(self):
+        """
+        POST /save-prompt
+        Body: { "type": "strategy"|"journal", "prompts": [...] }
+        将完整的 prompts 数组写入对应的单个 JSON 文件。
+        """
+        try:
+            body        = self._read_body()
+            payload     = json.loads(body)
+            prompt_type = payload.get('type', 'strategy')
+            prompts     = payload.get('prompts')
+
+            if not isinstance(prompts, list):
+                self.send_error_response(400, '"prompts" must be a list'); return
+
+            target = JOURNAL_PROMPT_FILE if prompt_type == 'journal' else STRATEGY_PROMPT_FILE
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(target, 'w', encoding='utf-8') as f:
+                json.dump({'prompts': prompts}, f, indent=2, ensure_ascii=False)
+
+            self._json_response(200, {'success': True, 'message': f'✓ Saved {target.name}'})
+            print(f'✓ /save-prompt [{prompt_type}]: {target}')
+        except json.JSONDecodeError:
+            self.send_error_response(400, 'Invalid JSON')
+        except Exception as e:
+            self.send_error_response(500, str(e))
+
+    # ── /update-astocks (legacy /update-sci2k alias) ───────
+    def _handle_update_astocks(self):
+        """
+        POST /update-astocks
+        Body: { "start_date": "20260401" }   (可选，缺省用 body 里的值)
+        调用 data/get_Astocks_data.py，更新全部 A 股数据至今日。
+        通过 SSE 实时推送输出。
+        """
+        import time
+        try:
+            body    = self._read_body()
+            payload = json.loads(body) if body.strip() else {}
+        except Exception:
+            payload = {}
+
+        from datetime import date
+        today      = date.today().strftime('%Y%m%d')
+        start_date = payload.get('start_date', '20250101')
+
+        script = PROJECT_DIR / 'data' / 'get_Astocks_data.py'
+        if not script.exists():
+            self.send_error_response(404, f'Script not found: {script}'); return
+
+        # SSE 流式输出
+        self.send_response(200)
+        self.send_header('Content-Type',  'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Accel-Buffering', 'no')
+        self._cors()
+        self.end_headers()
+
+        def sse(obj):
+            try:
+                self.wfile.write(('data: ' + json.dumps(obj, ensure_ascii=False) + '\n\n').encode('utf-8'))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        sse({'type': 'stage', 'message': f'开始更新全部 A 股数据 {start_date} → {today}'})
+
+        env = {
+            **os.environ,
+            'PYTHONIOENCODING': 'utf-8',
+            'ASTOCKS_DATA_DIR': str(DOCS_DIR / 'data' / 'Astocks'),
+        }
+        cmd = [sys.executable, str(script), '--start', start_date, '--end', today, '--incremental']
+
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(PROJECT_DIR),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8', errors='replace', env=env
+            )
+            q = queue.Queue()
+            def _read(pipe, kind):
+                for line in pipe: q.put((kind, line.rstrip()))
+                q.put((kind, None))
+            threading.Thread(target=_read, args=(proc.stdout, 'stdout'), daemon=True).start()
+            threading.Thread(target=_read, args=(proc.stderr, 'stderr'), daemon=True).start()
+
+            done = 0
+            while done < 2:
+                kind, line = q.get()
+                if line is None: done += 1
+                else:
+                    sse({'type': kind, 'line': line})
+                    print(f'  [astocks/{kind}] {line}')
+
+            proc.wait()
+            index_script = PROJECT_DIR / 'data' / 'get_Astocks_indices.py'
+            if index_script.exists():
+                sse({'type': 'stage', 'message': 'Updating common indices'})
+                index_proc = subprocess.Popen(
+                    [sys.executable, str(index_script), '--end', today], cwd=str(PROJECT_DIR),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding='utf-8', errors='replace', env=env
+                )
+                for line in index_proc.stdout:
+                    sse({'type': 'line', 'line': line.rstrip()})
+                index_proc.wait()
+                if index_proc.returncode == 0:
+                    sse({'type': 'success', 'message': 'Index data update complete'})
+                else:
+                    sse({'type': 'error', 'message': f'Index update exit code {index_proc.returncode}'})
+            etf_script = PROJECT_DIR / 'data' / 'get_etf_data.py'
+            if etf_script.exists():
+                sse({'type': 'stage', 'message': 'Updating listed ETF data'})
+                etf_proc = subprocess.Popen(
+                    [sys.executable, str(etf_script), '--start', start_date, '--end', today],
+                    cwd=str(PROJECT_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding='utf-8', errors='replace', env=env
+                )
+                for line in etf_proc.stdout:
+                    sse({'type': 'line', 'line': line.rstrip()})
+                etf_proc.wait()
+                if etf_proc.returncode == 0:
+                    sse({'type': 'success', 'message': 'ETF data update complete'})
+                else:
+                    sse({'type': 'error', 'message': f'ETF update exit code {etf_proc.returncode}'})
+            if proc.returncode == 0:
+                sse({'type': 'success', 'message': '✓ 全部 A 股数据更新完成'})
+            else:
+                sse({'type': 'error', 'message': f'✗ 脚本退出码 {proc.returncode}'})
+        except Exception as e:
+            sse({'type': 'error', 'message': f'执行失败: {e}'})
+
+        try:
+            self.wfile.write(b'data: [DONE]\n\n')
+            self.wfile.flush()
+        except Exception:
+            pass
+        print('✓ /update-astocks 完成')
 
     # ── /download-stocks ────────────────────────────────────
     def _handle_download_stocks(self):
@@ -390,7 +936,8 @@ class SaveHandler(BaseHTTPRequestHandler):
         print(f'  {format % args}')
 
 
-def run_server(port=9999):
+def run_server(port=8888):
+    os.chdir(DOCS_DIR)
     server_address = ('127.0.0.1', port)
     httpd = HTTPServer(server_address, SaveHandler)
 
@@ -403,7 +950,10 @@ def run_server(port=9999):
     print(f'  POST /save                 ← stocks.json')
     print(f'  POST /download-stocks      ← tushare 脚本')
     print(f'  GET  /load-config?path=…   ← 读配置文件')
+    print(f'  GET  /load-prompts?type=…  ← 读提示词文件 (strategy|journal)')
+    print(f'  POST /save-prompt          ← 写提示词文件')
     print(f'  POST /save-config          ← 写配置文件')
+    print(f'  POST /update-astocks       ← SSE 更新全部 A 股数据')
     print(f'  POST /run-agent            ← SSE 运行智能体')
     print(f'')
     print(f'🛑  Ctrl+C 停止\n')
@@ -416,5 +966,5 @@ def run_server(port=9999):
 
 
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9999
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8888
     run_server(port)
