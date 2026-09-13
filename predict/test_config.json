@@ -1,7 +1,7 @@
 {
   "prediction_date": "",
-  "prediction_start_date": "20260824",
-  "prediction_end_date": "20260825",
+  "prediction_start_date": "20260803",
+  "prediction_end_date": "20260810",
   "lookback_days": 10,
   "request_timeout_seconds": 90,
   "use_news_search": true,
@@ -22,16 +22,6 @@
       "json_mode": false
     },
     {
-      "name": "Kimi-k2.6",
-      "basemodel": "kimi-k2.6",
-      "signature": "kimi-k2.6",
-      "enabled": false,
-      "openai_base_url": "https://api.moonshot.cn/v1",
-      "temperature": 1,
-      "api_key_env": "MOONSHOT_API_KEY",
-      "json_mode": false
-    },
-    {
       "name": "openai/gpt-oss-20b",
       "basemodel": "openai/gpt-oss-20b",
       "signature": "openai/gpt-oss-20b",
@@ -41,21 +31,40 @@
       "json_mode": false
     },
     {
-      "name": "openai/gpt-oss-120b",
-      "basemodel": "openai/gpt-oss-120b",
-      "signature": "openai/gpt-oss-120b",
-      "enabled": true,
-      "openai_base_url": "https://integrate.api.nvidia.com/v1",
-      "api_key_env": "NVIDIA_API_KEY",
-      "json_mode": false
-    },
-    {
       "name": "glm-5.3",
       "basemodel": "glm-5.3",
       "signature": "glm-5.3",
-      "enabled": false,
-      "openai_base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      "api_key_env": "ZHIPU_API_KEY",
+      "enabled": true,
+      "openai_base_url": "https://www.autodl.art/api/v1",
+      "api_key_env": "AUTODL_API_KEY",
+      "json_mode": false
+    },
+    {
+      "name": "Kimi-k2.6",
+      "basemodel": "kimi-k2.6",
+      "signature": "kimi-k2.6",
+      "enabled": true,
+      "openai_base_url": "https://www.autodl.art/api/v1",
+      "temperature": 1,
+      "api_key_env": "AUTODL_API_KEY",
+      "json_mode": false
+    },
+    {
+      "name": "gpt-5.5",
+      "basemodel": "gpt-5.5",
+      "signature": "gpt-5.5",
+      "enabled": true,
+      "openai_base_url": "https://www.autodl.art/api/v1",
+      "api_key_env": "AUTODL_API_KEY",
+      "json_mode": false
+    },
+    {
+      "name": "qwen3-vl-plus",
+      "basemodel": "qwen3-vl-plus",
+      "signature": "qwen3-vl-plus",
+      "enabled": true,
+      "openai_base_url": "https://www.autodl.art/api/v1",
+      "api_key_env": "AUTODL_API_KEY",
       "json_mode": false
     }
   ]
