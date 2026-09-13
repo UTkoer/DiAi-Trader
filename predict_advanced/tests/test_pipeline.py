@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from predict_advanced.client import call_model, ModelFailure
+from predict_advanced.mcp_client import MCPError
 from predict_advanced.data import validate_rows, prediction_cutoff, parse_timestamp, features
 from predict_advanced.evaluate_results import summarize, evaluate
 from predict_advanced.news import filter_news
@@ -150,7 +152,9 @@ class RunnerTests(unittest.TestCase):
         self.data.mkdir()
         (self.data / "TEST.json").write_text(json.dumps({"ts_code": "TEST", "name": "Test index", "records": market_rows()}), encoding="utf-8")
         self.config = {"prediction_date": "20260801", "lookback_days": 30, "data_dir": str(self.data),
-                       "output_dir": str(self.root / "output"), "models": [
+                       "output_dir": str(self.root / "output"), "feature_analysis_required": True,
+                       "feature_mcp": {"command": sys.executable, "args": [str(Path(__file__).resolve().parents[1] / "mcp_tools" / "feature_analysis_server.py")], "timeout_seconds": 10},
+                       "models": [
                            {"name": "demo<advanced>", "basemodel": "demo", "enabled": True,
                             "api_key_env": "TEST_ADVANCED_KEY", "openai_base_url": "https://example.com/v1"}]}
 
@@ -164,6 +168,9 @@ class RunnerTests(unittest.TestCase):
         report = run(self.config, dry_run=True, caller=lambda *args, **kwargs: self.fail("network call"))
         self.assertFalse(output.exists())
         entry = report["previews"][0]["indices"][0]
+        self.assertTrue(entry["feature_analysis_required"])
+        self.assertEqual(entry["feature_tool_audit"]["transport"], "stdio")
+        self.assertIn('"feature_analysis"', entry["prompt"])
         self.assertNotIn('"actual"', entry["prompt"])
         self.assertNotIn('"trade_date": "20260801"', entry["prompt"])
         self.assertIn("TEST", entry["prompt"])
@@ -184,6 +191,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(prompts[0][1], prompts[1][1])
         payload = json.loads(Path(report["written"][0]).read_text(encoding="utf-8"))
         self.assertEqual(payload["agent_name"], "demo<advanced>")
+        self.assertEqual(payload["feature_tool"], "predict-stock-features.analyze_stock_features")
         entry = payload["predictions"][0]
         for key in ("ts_code", "name", "as_of_date", "lookback", "news_context", "prediction", "actual", "verification"):
             self.assertIn(key, entry)
@@ -262,6 +270,27 @@ class IntegrationEdgeTests(unittest.TestCase):
         self.assertNotIn("FUTURE_SECRET", entry["prompt"])
         self.assertEqual(entry["news_status"], "ok")
         self.assertEqual(len(entry["news_audit"]), 2)
+
+    @patch.dict(os.environ, {"TEST_ADVANCED_KEY": "test"})
+    def test_feature_tool_failure_blocks_model(self):
+        class FailedClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def analyze(self, arguments):
+                raise MCPError("mcp_test_failure")
+
+        called = []
+        with redirect_stdout(io.StringIO()):
+            report = run(self.config, caller=lambda *args, **kwargs: called.append(True),
+                         feature_client_factory=FailedClient)
+        self.assertEqual(called, [])
+        item = json.loads(Path(report["written"][0]).read_text(encoding="utf-8"))["predictions"][0]
+        self.assertEqual(item["error_type"], "feature_tool_error")
+        self.assertNotIn("prediction", item)
 
 
 if __name__ == "__main__":

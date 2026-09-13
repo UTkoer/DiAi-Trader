@@ -128,3 +128,11 @@ python -m compileall -q predict_advanced
 时点过滤不能消除 LLM 训练语料记忆历史走势的污染，也无法证明本地行情未被事后修订或新闻时间字段真实。原始行情没有可信版本时间，新闻需可信归档；本系统不能保证零未来信息风险。来源质量、交易日历和概率校准仍需人工审查，模型版本和服务商变化也会影响复现。不同模型 temperature 可配置但会影响公平比较；Kimi 示例沿用旧配置 temperature=1，不保证所有服务商支持同一参数。
 
 这是一套独立 LLM 研究评估流程，不是投资建议，也不承诺预测准确率或收益。
+
+## 新增：独立特征分析 MCP 服务
+
+`predict_advanced/mcp_tools/feature_analysis_server.py` 暴露 `analyze_stock_features` 和 `feature_definitions`。模型通过支持 MCP 的宿主传入一段历史日线，即可获得收益、均线、波动、最大回撤、简单 RSI/ATR、布林带、量价和数据质量信息；计算不调用其他模型。
+
+安装：`python -m pip install -r predict_advanced/mcp_tools/requirements.txt`。客户端示例见 `predict_advanced/mcp_tools/config.json`，详细参数、指标口径及安全边界见同目录 README.md。
+
+此服务独立于当前单次聊天 runner；配置并不会自动使 runner 支持自主 MCP 工具调用。原预测字段和旧结果目录均未因新增工具而修改。

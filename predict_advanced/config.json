@@ -1,24 +1,65 @@
 ﻿{
-  "prediction_date": "20260810",
-  "prediction_start_date": "20260803",
-  "prediction_end_date": "20260810",
-  "prediction_cutoff_datetime": null,
-  "lookback_days": 30,
-  "data_dir": "data/Astocks/indices",
-  "output_dir": "data/predict",
-  "index_codes": [],
-  "trading_calendar": "",
-  "request_timeout_seconds": 90,
-  "max_retries": 2,
-  "max_prompt_chars": 60000,
-  "news_cache": "",
-  "news_max_results": 5,
-  "news_max_chars": 800,
-  "rules": "Use only supplied observations and concise evidence. Never claim certainty or provide trading instructions.",
-  "models": [
-    {"name":"glm-5.3<advanced>","basemodel":"glm-5.3","enabled":true,"openai_base_url":"https://www.autodl.art/api/v1","api_key_env":"AUTODL_API_KEY","temperature":0.1,"json_mode":false},
-    {"name":"Kimi-k2.6<advanced>","basemodel":"kimi-k2.6","enabled":false,"openai_base_url":"https://www.autodl.art/api/v1","api_key_env":"AUTODL_API_KEY","temperature":1,"json_mode":false},
-    {"name":"gpt-5.5<advanced>","basemodel":"gpt-5.5","enabled":false,"openai_base_url":"https://www.autodl.art/api/v1","api_key_env":"AUTODL_API_KEY","temperature":0.1,"json_mode":false},
-    {"name":"qwen3-vl-plus<advanced>","basemodel":"qwen3-vl-plus","enabled":false,"openai_base_url":"https://www.autodl.art/api/v1","api_key_env":"AUTODL_API_KEY","temperature":0.1,"json_mode":false}
-  ]
+    "prediction_date":  "20260810",
+    "prediction_start_date":  "20260803",
+    "prediction_end_date":  "20260810",
+    "prediction_cutoff_datetime":  null,
+    "lookback_days":  30,
+    "data_dir":  "data/Astocks/indices",
+    "output_dir":  "data/predict",
+    "index_codes":  [
+
+                    ],
+    "trading_calendar":  "",
+    "request_timeout_seconds":  90,
+    "max_retries":  2,
+    "max_prompt_chars":  60000,
+    "news_cache":  "",
+    "news_max_results":  5,
+    "news_max_chars":  800,
+    "rules":  "Use only supplied observations and concise evidence. Never claim certainty or provide trading instructions.",
+    "models":  [
+                   {
+                       "name":  "glm-5.3\u003cadvanced\u003e",
+                       "basemodel":  "glm-5.3",
+                       "enabled":  true,
+                       "openai_base_url":  "https://www.autodl.art/api/v1",
+                       "api_key_env":  "AUTODL_API_KEY",
+                       "temperature":  0.1,
+                       "json_mode":  false
+                   },
+                   {
+                       "name":  "Kimi-k2.6\u003cadvanced\u003e",
+                       "basemodel":  "kimi-k2.6",
+                       "enabled":  false,
+                       "openai_base_url":  "https://www.autodl.art/api/v1",
+                       "api_key_env":  "AUTODL_API_KEY",
+                       "temperature":  1,
+                       "json_mode":  false
+                   },
+                   {
+                       "name":  "gpt-5.5\u003cadvanced\u003e",
+                       "basemodel":  "gpt-5.5",
+                       "enabled":  false,
+                       "openai_base_url":  "https://www.autodl.art/api/v1",
+                       "api_key_env":  "AUTODL_API_KEY",
+                       "temperature":  0.1,
+                       "json_mode":  false
+                   },
+                   {
+                       "name":  "qwen3-vl-plus\u003cadvanced\u003e",
+                       "basemodel":  "qwen3-vl-plus",
+                       "enabled":  false,
+                       "openai_base_url":  "https://www.autodl.art/api/v1",
+                       "api_key_env":  "AUTODL_API_KEY",
+                       "temperature":  0.1,
+                       "json_mode":  false
+                   }
+               ],
+    "feature_analysis_required":  true,
+    "feature_analysis_tool":  "predict-stock-features.analyze_stock_features",
+    "feature_mcp":  {
+        "command": "python",
+        "args": ["predict_advanced/mcp_tools/feature_analysis_server.py"],
+        "timeout_seconds": 30
+    }
 }
