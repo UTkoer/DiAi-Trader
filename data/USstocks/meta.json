@@ -1,0 +1,13 @@
+{
+  "asset_type": "US_STOCK",
+  "stock_count": 1,
+  "symbols": [
+    "NVDA"
+  ],
+  "name_map": {
+    "NVDA": "NVDA"
+  },
+  "updated_at": "2026-09-20 09:36:38",
+  "start_date": "20260102",
+  "end_date": "20260918"
+}

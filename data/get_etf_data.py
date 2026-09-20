@@ -102,6 +102,7 @@ def main():
     parser.add_argument("--start", default=START_DEFAULT)
     parser.add_argument("--end", default=datetime.now().strftime("%Y%m%d"))
     parser.add_argument("--token", default=os.getenv("TUSHARE_TOKEN"))
+    parser.add_argument("--symbols", nargs="*", help="仅更新指定 ETF 代码")
     parser.add_argument("--limit", type=int, default=0, help="仅调试时限制基金数量，0 表示全部")
     args = parser.parse_args()
     if not args.token:
@@ -115,6 +116,14 @@ def main():
     if funds is None or funds.empty:
         raise RuntimeError("Tushare fund_basic returned no listed ETFs")
     funds = funds.drop_duplicates("ts_code").sort_values("ts_code")
+    if args.symbols:
+        selected = {str(symbol).strip().upper() for symbol in args.symbols if str(symbol).strip()}
+        funds = funds[funds["ts_code"].astype(str).str.upper().isin(selected)]
+        missing = sorted(selected - set(funds["ts_code"].astype(str).str.upper()))
+        if missing:
+            print(f"未在上市 ETF 列表中找到：{', '.join(missing)}")
+        if funds.empty:
+            raise RuntimeError("指定的 ETF 均未在 Tushare 上市基金列表中找到")
     if args.limit:
         funds = funds.head(args.limit)
     rows_by_date, symbols = {}, []
@@ -159,6 +168,24 @@ def main():
         for row in records:
             row = {**row, "name": name}
             rows_by_date.setdefault(norm(row.get("trade_date")), []).append(row)
+    processed_symbols = set(symbols)
+    for path in sorted(STOCKS_DIR.glob("*.json")):
+        code = path.stem
+        if code in processed_symbols:
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        records = payload.get("records") or []
+        if not records:
+            continue
+        name = str(payload.get("name") or code)
+        symbols.append(code)
+        for row in records:
+            rows_by_date.setdefault(norm(row.get("trade_date")), []).append({**row, "name": name})
+    symbols.sort()
     dates = sorted(rows_by_date)
     for date in dates:
         payload = {"date": date, "asset_count": len(rows_by_date[date]), "data": rows_by_date[date]}

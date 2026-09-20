@@ -80,7 +80,7 @@ def _calc_tech_factors(df: pd.DataFrame) -> pd.DataFrame:
 
 class AstocksHandler:
 
-    def __init__(self, token: str = None, start_date: str = DEFAULT_START, end_date: str = DEFAULT_END, incremental: bool = False):
+    def __init__(self, token: str = None, start_date: str = DEFAULT_START, end_date: str = DEFAULT_END, incremental: bool = False, symbols: list[str] = None):
         """
         Args:
             token:      Tushare API Token，若为 None 则从环境变量 TUSHARE_TOKEN 读取
@@ -96,6 +96,7 @@ class AstocksHandler:
         self.start_date = _to_tushare_date(start_date)
         self.end_date   = _to_tushare_date(end_date)
         self.incremental = incremental
+        self.requested_symbols = {str(symbol).strip().upper() for symbol in (symbols or []) if str(symbol).strip()}
         self.symbol_start_dates = {}
 
         # 创建目录
@@ -246,6 +247,13 @@ class AstocksHandler:
             raise RuntimeError("未能获取全部 A 股列表，请检查 Tushare 权限或 Token")
         # 沪深北交易所股票代码；排除基金、债券和指数
         df = df[df["ts_code"].str.endswith((".SH", ".SZ", ".BJ"), na=False)]
+        if self.requested_symbols:
+            df = df[df["ts_code"].isin(self.requested_symbols)]
+            missing = sorted(self.requested_symbols - set(df["ts_code"].astype(str)))
+            if missing:
+                print(f"⚠️ 未在上市 A 股列表中找到：{', '.join(missing)}")
+            if df.empty:
+                raise RuntimeError("指定的 A 股均未在 Tushare 上市股票列表中找到")
         symbols = df["ts_code"].drop_duplicates().tolist()
         name_map = dict(zip(df["ts_code"], df["name"]))
         print(f"✅ 共 {len(symbols)} 只成分股，正在获取股票名称...")
@@ -527,7 +535,7 @@ class AstocksHandler:
             "end_date":     (global_max or self.end_date),
             "updated_at":   updated_at,
             "stock_count":  saved_count,
-            "symbols":      symbols,
+            "symbols":      sorted(merged_dict),
             "columns":      columns,
             "name_map":     name_map,
         }
@@ -609,6 +617,7 @@ if __name__ == "__main__":
     parser.add_argument("--end",   default=DEFAULT_END,   help="结束日期 yyyymmdd 或 yyyy-mm-dd（默认20260531）")
     parser.add_argument("--token", default=None,          help="Tushare Token（默认从 .env TUSHARE_TOKEN 读取）")
     parser.add_argument("--incremental", action="store_true", help="仅抓取本地最新日期之后的数据")
+    parser.add_argument("--symbols", nargs="*", help="仅更新指定 A 股代码")
     parser.add_argument("--build-partitions", action="store_true", help="仅从现有单股历史文件生成按日期分段的前端 JSON")
     args = parser.parse_args()
 
@@ -617,6 +626,7 @@ if __name__ == "__main__":
         start_date=args.start,
         end_date=args.end,
         incremental=args.incremental,
+        symbols=args.symbols,
     )
     if args.build_partitions:
         handler.build_frontend_partitions()

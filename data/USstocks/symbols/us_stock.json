@@ -1,0 +1,9 @@
+{
+  "symbolname": "美股指数",
+  "symbols": [
+    "DJI",
+    "SPX",
+    "NDX",
+    "HXC"
+  ]
+}

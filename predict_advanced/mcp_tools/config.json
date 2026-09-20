@@ -1,8 +1,0 @@
-﻿{
-  "mcpServers": {
-    "stock-features": {
-      "command": "python",
-      "args": ["E:\\python-project\\DiAi-Trader\\predict_advanced\\mcp_tools\\feature_analysis_server.py"]
-    }
-  }
-}

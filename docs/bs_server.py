@@ -5,6 +5,7 @@ Stock Manager Save Server
   GET  /health              健康检查
   POST /save                保存 stocks.json（choose_stock 页面用）
   POST /download-stocks     执行 data/1.get_price_tushare.py
+  POST /quick-download-data 下载指定标的并生成完整市场数据结构
   GET  /load-config         读取任意 JSON 配置文件（run_agent 页面用）
   POST /save-config         保存任意 JSON 配置文件（run_agent 页面用）
   POST /run-agent           依次执行 mcp_services_start.py + main_client.py（SSE 流式输出）
@@ -20,6 +21,8 @@ import sys
 import subprocess
 import threading
 import queue
+import re
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
@@ -40,6 +43,7 @@ ASTOCKS_DAILY_DIR    = DOCS_DIR / 'data' / 'Astocks' / 'daily'
 ETFS_DATA_DIR        = PROJECT_DIR / 'data' / 'ETFs'
 PREDICT_OUTPUT_DIR   = PROJECT_DIR / 'data' / 'predict'
 MARKET_FACTORS_CACHE = None
+QUICK_DOWNLOAD_LOCK  = threading.Lock()
 # 自定义提示词单文件路径
 STRATEGY_PROMPT_FILE = PROJECT_DIR / 'agent' / 'custom_prompt' / 'trading_strategy_prompt.json'
 JOURNAL_PROMPT_FILE  = PROJECT_DIR / 'agent' / 'custom_prompt' / 'daily_journal_prompt.json'
@@ -527,6 +531,9 @@ class SaveHandler(SimpleHTTPRequestHandler):
         elif path == '/download-stocks':
             self._handle_download_stocks()
 
+        elif path == '/quick-download-data':
+            self._handle_quick_download_data()
+
         elif path in ('/update-astocks', '/update-sci2k'):
             self._handle_update_astocks()
 
@@ -739,6 +746,180 @@ class SaveHandler(SimpleHTTPRequestHandler):
         print('✓ /update-astocks 完成')
 
     # ── /download-stocks ────────────────────────────────────
+    def _handle_quick_download_data(self):
+        """Run one of the fixed market-data downloaders and stream its output."""
+        try:
+            payload = json.loads(self._read_body())
+            if not isinstance(payload, dict):
+                raise ValueError('请求内容必须是 JSON 对象')
+            cmd, label, output_dir = self._build_quick_download_command(payload)
+            post_commands = self._build_quick_download_post_commands(payload)
+        except json.JSONDecodeError:
+            self.send_error_response(400, 'Invalid JSON')
+            return
+        except ValueError as exc:
+            self.send_error_response(400, str(exc))
+            return
+
+        if not QUICK_DOWNLOAD_LOCK.acquire(blocking=False):
+            self.send_error_response(409, '已有数据下载任务正在运行，请稍后再试')
+            return
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Accel-Buffering', 'no')
+        self._cors()
+        self.end_headers()
+
+        def sse(obj):
+            try:
+                self.wfile.write(('data: ' + json.dumps(obj, ensure_ascii=False) + '\n\n').encode('utf-8'))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+        sse({'type': 'stage', 'message': f'开始下载 {label}', 'output_dir': output_dir})
+        print(f'▶ /quick-download-data: {label}')
+
+        def run_command(command, stage):
+            sse({'type': 'stage', 'message': stage})
+            proc = subprocess.Popen(
+                command,
+                cwd=str(PROJECT_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env,
+            )
+            lines = queue.Queue()
+
+            def read_pipe(pipe, kind):
+                try:
+                    for line in pipe:
+                        lines.put((kind, line.rstrip()))
+                finally:
+                    lines.put((kind, None))
+
+            threading.Thread(target=read_pipe, args=(proc.stdout, 'stdout'), daemon=True).start()
+            threading.Thread(target=read_pipe, args=(proc.stderr, 'stderr'), daemon=True).start()
+            finished_pipes = 0
+            while finished_pipes < 2:
+                kind, line = lines.get()
+                if line is None:
+                    finished_pipes += 1
+                    continue
+                sse({'type': kind, 'line': line})
+                print(f'  [quick-download/{kind}] {line}')
+            proc.wait()
+            return proc.returncode
+
+        try:
+            returncode = run_command(cmd, f'下载原始行情：{label}')
+            if returncode != 0:
+                sse({'type': 'error', 'message': f'下载脚本退出码：{returncode}'})
+            else:
+                for stage, post_command in post_commands:
+                    returncode = run_command(post_command, stage)
+                    if returncode != 0:
+                        sse({'type': 'error', 'message': f'{stage}失败，脚本退出码：{returncode}'})
+                        break
+                if returncode == 0:
+                    sse({'type': 'success', 'message': f'下载及完整结构编排完成，数据已保存至 {output_dir}'})
+        except Exception as exc:
+            sse({'type': 'error', 'message': f'执行失败：{exc}'})
+        finally:
+            QUICK_DOWNLOAD_LOCK.release()
+            try:
+                self.wfile.write(b'data: [DONE]\n\n')
+                self.wfile.flush()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _build_quick_download_command(payload):
+        asset_type = str(payload.get('asset_type', '')).strip()
+        definitions = {
+            'astock-index': ('A股指数', PROJECT_DIR / 'data' / 'get_Astocks_indices.py', 'data/Astocks/indices'),
+            'astock': ('A股股票', PROJECT_DIR / 'data' / 'get_Astocks_data.py', 'data/Astocks'),
+            'etf': ('场内 ETF', PROJECT_DIR / 'data' / 'get_etf_data.py', 'data/ETFs'),
+            'us-stock': ('美股（yfinance）', PROJECT_DIR / 'data' / 'get_us_stocks_data_yfinance.py', 'data/USstocks'),
+        }
+        if asset_type not in definitions:
+            raise ValueError('不支持的数据类型')
+
+        raw_symbols = payload.get('symbols')
+        if isinstance(raw_symbols, str):
+            symbols = re.split(r'[\s,，;；]+', raw_symbols.strip())
+        elif isinstance(raw_symbols, list):
+            symbols = raw_symbols
+        else:
+            symbols = []
+        symbols = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
+        if not symbols:
+            raise ValueError('请至少输入一个标的代码')
+        if len(symbols) > 500:
+            raise ValueError('单次最多下载 500 个标的')
+        if any(len(symbol) > 32 or not re.fullmatch(r'[A-Z0-9.^_-]+', symbol) for symbol in symbols):
+            raise ValueError('标的代码只能包含字母、数字、点、连字符、下划线或 ^')
+
+        start_date = str(payload.get('start_date', '')).replace('-', '')
+        end_date = str(payload.get('end_date', '')).replace('-', '')
+        try:
+            start = datetime.strptime(start_date, '%Y%m%d')
+            end = datetime.strptime(end_date, '%Y%m%d')
+        except ValueError:
+            raise ValueError('开始日期和结束日期必须是有效日期')
+        if start > end:
+            raise ValueError('开始日期不能晚于结束日期')
+
+        label, script, output_dir = definitions[asset_type]
+        if not script.exists():
+            raise ValueError(f'下载脚本不存在：{script.name}')
+        cmd = [
+            sys.executable,
+            str(script),
+            '--start', start_date,
+            '--end', end_date,
+            '--symbols', *symbols,
+        ]
+        return cmd, f'{label}（{len(symbols)} 个标的，{start_date} → {end_date}）', output_dir
+
+    @staticmethod
+    def _build_quick_download_post_commands(payload):
+        asset_type = str(payload.get('asset_type', '')).strip()
+        start_date = str(payload.get('start_date', '')).replace('-', '')
+        end_date = str(payload.get('end_date', '')).replace('-', '')
+        layout_script = PROJECT_DIR / 'data' / 'build_market_layout.py'
+        definitions = {
+            'astock-index': (PROJECT_DIR / 'data' / 'Astocks', 'A_STOCK_INDEX', 'indices'),
+            'astock': (PROJECT_DIR / 'data' / 'Astocks', 'A_STOCK', 'stocks'),
+            'etf': (PROJECT_DIR / 'data' / 'ETFs', 'ETF', 'stocks'),
+            'us-stock': (PROJECT_DIR / 'data' / 'USstocks', 'US_STOCK', 'stocks'),
+        }
+        if asset_type not in definitions or not layout_script.exists():
+            raise ValueError('完整结构编排脚本不存在或数据类型无效')
+        root, asset_name, source = definitions[asset_type]
+        commands = []
+        if asset_type == 'astock-index':
+            factor_script = PROJECT_DIR / 'data' / 'get_Astocks_index_factors.py'
+            if not factor_script.exists():
+                raise ValueError(f'指数因子脚本不存在：{factor_script.name}')
+            commands.append((
+                '计算指数技术因子',
+                [sys.executable, str(factor_script), '--indices-root', str(root / 'indices'),
+                 '--output-root', str(root / 'factors'), '--start', start_date, '--end', end_date, '--only-new'],
+            ))
+        commands.append((
+            '生成 daily、factors、symbols、dates、latest、merged 和 meta',
+            [sys.executable, str(layout_script), '--root', str(root), '--asset-type', asset_name, '--source', source],
+        ))
+        return commands
+
+    # ── /download-stocks ────────────────────────────────────
     def _handle_download_stocks(self):
         script_path = DOCS_DIR / 'data' / 'get_data.py'
         if not script_path.exists():
@@ -949,6 +1130,7 @@ def run_server(port=8888):
     print(f'  GET  /health')
     print(f'  POST /save                 ← stocks.json')
     print(f'  POST /download-stocks      ← tushare 脚本')
+    print(f'  POST /quick-download-data  ← 按标的快速下载行情')
     print(f'  GET  /load-config?path=…   ← 读配置文件')
     print(f'  GET  /load-prompts?type=…  ← 读提示词文件 (strategy|journal)')
     print(f'  POST /save-prompt          ← 写提示词文件')
