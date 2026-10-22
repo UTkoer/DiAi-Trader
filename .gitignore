@@ -6,3 +6,4 @@ logs/
 configs/astock_config_day.json
 api.json
 data/Astocks
+*.pyc
