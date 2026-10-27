@@ -26,7 +26,7 @@ class AgentManager {
     async loadConfig() {
         try {
             const res = await fetch(
-                `http://127.0.0.1:9999/load-config?path=${encodeURIComponent(this.configPathForBackend)}`
+                `/load-config?path=${encodeURIComponent(this.configPathForBackend)}`
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const result = await res.json();
@@ -49,7 +49,7 @@ class AgentManager {
             agent_config: { max_steps: 3, max_retries: 3, base_delay: 1.0, initial_cash: 1000000.0 },
             log_config: {
                 model_data_path: './data/agent_data_astock/ZSG_17_day',
-                Ashare_data_path: './data/a_stock_data/ZSG_17_day/merged.jsonl',
+                Ashare_data_path: './data/Astocks',
                 Ashare_symbols: 'ZSG_17',
                 BAR_MODE: 'daily'
             }
@@ -62,7 +62,7 @@ class AgentManager {
 
     async saveConfigToDisk(silent = false) {
         try {
-            const res = await fetch('http://127.0.0.1:9999/save-config', {
+            const res = await fetch('/save-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path: this.configPathForBackend, data: this.config })
@@ -489,7 +489,7 @@ class AgentManager {
         this.appendTerminalLine('─'.repeat(52), 'dim');
 
         try {
-            const res = await fetch('http://127.0.0.1:9999/run-agent', {
+            const res = await fetch('/run-agent', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ config_path: this.configPathForBackend })
