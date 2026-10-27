@@ -6,7 +6,7 @@
 - 自算技术因子：动量、波动率、均线、量比
 - 存储格式：
     data/Astocks/stocks/<ts_code>.json  每只股票独立文件
-    data/Astocks/merged.json            合并文件，方便前端读取
+    data/Astocks/merged.json            （可选）合并文件，仅 --write-merged 时生成
     data/Astocks/meta.json              元信息（股票列表、更新时间等）
 """
 
@@ -492,10 +492,10 @@ class AstocksHandler:
     # ── Step 6: 保存数据 ───────────────────────────────────────────────
     def save(self, df: pd.DataFrame, symbols: list[str], name_map: dict = None):
         """
-        保存两种格式：
+        保存数据：
         1. data/Astocks/stocks/<ts_code>.json  每只股票独立 JSON
-        2. data/Astocks/merged.json            前端友好的合并文件
-        3. data/Astocks/meta.json              元信息
+        2. data/Astocks/meta.json              元信息
+        3. data/Astocks/merged.json            可选；仅 --write-merged 时生成
         """
         print(f"\n💾 保存数据...")
         updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -614,28 +614,29 @@ class AstocksHandler:
         global_max = max(all_dates) if all_dates else global_max
         print(f"  ✅ 单股文件：{saved_count} 个 → {STOCKS_DIR}")
 
-        # ── merged.json ─────────────────────────────────────────────
+        # ── merged.json（可选，默认关闭）──────────────────────────────
         # 结构：{ "meta": {...}, "columns": [...], "data": { ts_code: [records] } }
         # Keep names once in a top-level map instead of repeating them per row.
-        merged_dict = {
-            symbol: [_compact_record(record, strip_name=True) for record in records]
-            for symbol, records in merged_dict.items()
-        }
-        merged_payload = {
-            "meta": {
-                "index_code":   INDEX_CODE,
-                "start_date":   (global_min or self.start_date),
-                "end_date":     (global_max or self.end_date),
-                "updated_at":   updated_at,
-                "stock_count":  saved_count,
-            },
-            "columns": [c for c in columns if c != "ts_code"],
-            "names": merged_name_map,
-            "data":    merged_dict,
-        }
-        with open(MERGED_FILE, "w", encoding="utf-8") as f:
-            json.dump(merged_payload, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-        print(f"  ✅ 合并文件 → {MERGED_FILE}")
+        if getattr(self, 'write_merged', False):
+            merged_dict = {
+                symbol: [_compact_record(record, strip_name=True) for record in records]
+                for symbol, records in merged_dict.items()
+            }
+            merged_payload = {
+                "meta": {
+                    "index_code":   INDEX_CODE,
+                    "start_date":   (global_min or self.start_date),
+                    "end_date":     (global_max or self.end_date),
+                    "updated_at":   updated_at,
+                    "stock_count":  saved_count,
+                },
+                "columns": [c for c in columns if c != "ts_code"],
+                "names": merged_name_map,
+                "data":    merged_dict,
+            }
+            with open(MERGED_FILE, "w", encoding="utf-8") as f:
+                json.dump(merged_payload, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            print(f"  ✅ 合并文件 → {MERGED_FILE}")
 
         # ── meta.json ────────────────────────────────────────────────
         meta = {
@@ -714,7 +715,8 @@ class AstocksHandler:
         print("\n" + "=" * 60)
         print("🎉 全部完成！")
         print(f"   单股文件目录：{STOCKS_DIR}")
-        print(f"   合并文件：    {MERGED_FILE}")
+        if getattr(self, 'write_merged', False):
+            print(f"   合并文件：    {MERGED_FILE}")
         print(f"   元信息文件：  {META_FILE}")
         print("=" * 60)
 
@@ -731,6 +733,7 @@ if __name__ == "__main__":
     parser.add_argument("--symbols", nargs="*", help="仅更新指定 A 股代码")
     parser.add_argument("--build-partitions", action="store_true", help="仅从现有单股历史文件生成按日期分段的前端 JSON")
     parser.add_argument("--write-daily", action="store_true", help="更新后额外生成旧版 daily/ 分片（默认不生成）")
+    parser.add_argument("--write-merged", action="store_true", help="更新后额外生成合并文件 merged.json（默认不生成）")
     args = parser.parse_args()
 
     handler = AstocksHandler(
@@ -744,4 +747,5 @@ if __name__ == "__main__":
         handler.build_frontend_partitions(write_daily=True)
     else:
         handler.write_daily = args.write_daily
+        handler.write_merged = args.write_merged
         handler.run()
